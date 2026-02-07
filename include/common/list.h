@@ -168,12 +168,26 @@ static inline void list_del_init(struct list_head *entry)
 }
 
 /**
- * @brief  Add new list member to the list.
+ * @brief  Add new list member after head.
  * @param  new: New list member.
  * @param  head: Head of the list.
  * @retval None
  */
 static inline void list_add(struct list_head *new, struct list_head *head)
+{
+    new->next = head->next;
+    new->prev = head;
+    head->next->prev = new;
+    head->next = new;
+}
+
+/**
+ * @brief  Add new list member before head (tail).
+ * @param  new: New list member.
+ * @param  head: Head of the list.
+ * @retval None
+ */
+static inline void list_add_tail(struct list_head *new, struct list_head *head)
 {
     new->prev = head->prev;
     new->next = head;
@@ -191,6 +205,19 @@ static inline void list_move(struct list_head *list, struct list_head *new_head)
 {
     list_del(list);
     list_add(list, new_head);
+}
+
+/**
+ * @brief  Move a list member from original list to another (tail).
+ * @param  list: The list member to move.
+ * @param  new_head: Head of the new list.
+ * @retval None
+ */
+static inline void list_move_tail(struct list_head *list,
+                                  struct list_head *new_head)
+{
+    list_del(list);
+    list_add_tail(list, new_head);
 }
 
 #endif

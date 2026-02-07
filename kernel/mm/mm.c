@@ -82,7 +82,7 @@ void heap_init(void)
                            (uintptr_t) &_user_stack_start);
     malloc_set_block_free(first_blk, true);
     malloc_set_block_length(first_blk, len);
-    list_add(&first_blk->list, &malloc_list);
+    list_add_tail(&first_blk->list, &malloc_list);
 }
 
 void *__malloc(size_t size)
@@ -124,7 +124,7 @@ void *__malloc(size_t size)
                                             malloc_get_block_length(blk));
                 malloc_set_block_free(new_blk, false);
                 malloc_set_block_length(new_blk, alloc_size);
-                list_add(&new_blk->list, &malloc_list);
+                list_add_tail(&new_blk->list, &malloc_list);
 
                 /* Return the memory address */
                 return new_blk->data;

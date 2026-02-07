@@ -434,10 +434,10 @@ static int thread_create(struct thread_info **new_thread,
     INIT_LIST_HEAD(&thread->join_list);
 
     /* Link the thread to the global thread list */
-    list_add(&thread->thread_list, &threads_list);
+    list_add_tail(&thread->thread_list, &threads_list);
 
     /* Enqueue the thread into the sleep list */
-    list_add(&thread->list, &sleep_list);
+    list_add_tail(&thread->list, &sleep_list);
 
     /* Return the pointer of the thread */
     *new_thread = thread;
@@ -475,8 +475,8 @@ static int _task_create(thread_func_t task_func,
     task->pid = pid;
     task->main_thread = thread;
     INIT_LIST_HEAD(&task->threads_list);
-    list_add(&thread->task_list, &task->threads_list);
-    list_add(&task->list, &tasks_list);
+    list_add_tail(&thread->task_list, &task->threads_list);
+    list_add_tail(&task->list, &tasks_list);
 
     /* Set the task ownership to the thread */
     thread->task = task;
@@ -578,7 +578,7 @@ static void thread_resume(struct thread_info *thread)
         return;
 
     thread->status = THREAD_READY;
-    list_move(&thread->list, &ready_list[thread->priority]);
+    list_move_tail(&thread->list, &ready_list[thread->priority]);
 }
 
 static void thread_delete(struct thread_info *thread)
@@ -607,7 +607,7 @@ void prepare_to_wait(struct list_head *wait_list,
 {
     preempt_disable();
 
-    list_add(&thread->list, wait_list);
+    list_add_tail(&thread->list, wait_list);
     thread->status = state;
 
     preempt_enable();
@@ -619,7 +619,7 @@ void finish_wait(struct thread_info *thread)
 
     if (thread != running_thread) {
         thread->status = THREAD_READY;
-        list_move(&thread->list, &ready_list[thread->priority]);
+        list_move_tail(&thread->list, &ready_list[thread->priority]);
     }
 
     preempt_enable();
@@ -643,7 +643,7 @@ void wake_up(struct list_head *wait_list)
     }
 
     /* Wake up the first highest-priority thread in the waiting list */
-    list_move(&highest_pri_thread->list,
+    list_move_tail(&highest_pri_thread->list,
               &ready_list[highest_pri_thread->priority]);
     highest_pri_thread->status = THREAD_READY;
 
@@ -660,7 +660,7 @@ void wake_up_all(struct list_head *wait_list)
     list_for_each_safe (curr, next, wait_list) {
         struct thread_info *thread = list_entry(curr, struct thread_info, list);
 
-        list_move(&thread->list, &ready_list[thread->priority]);
+        list_move_tail(&thread->list, &ready_list[thread->priority]);
         thread->status = THREAD_READY;
     }
 
@@ -801,7 +801,7 @@ static int sys_delay_ticks(uint32_t ticks)
 
     /* Enqueue the thread into the sleep list */
     running_thread->status = THREAD_WAIT;
-    list_add(&(running_thread->list), &sleep_list);
+    list_add_tail(&(running_thread->list), &sleep_list);
 
     preempt_enable();
 
@@ -1734,7 +1734,7 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 
     /* Add current thread into the timeout monitoring list */
     if (timeout > 0)
-        list_add(&running_thread->timeout_list, &timeout_list);
+        list_add_tail(&running_thread->timeout_list, &timeout_list);
 
     /* Record all files for polling */
     for (int i = 0; i < nfds; i++) {
@@ -1757,7 +1757,7 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
             filp = fdtable[fdesc_idx].file;
         }
 
-        list_add(&filp->list, &running_thread->poll_files_list);
+        list_add_tail(&filp->list, &running_thread->poll_files_list);
     }
 
     /* Wait until the file event happens */
@@ -1986,7 +1986,7 @@ static mqd_t sys_mq_open(const char *name, int oflag, struct mq_attr *attr)
     /* Set up the message queue */
     strncpy(new_mq->name, name, NAME_MAX - 1);
     new_mq->name[NAME_MAX - 1] = '\0';
-    list_add(&new_mq->list, &mqueue_list);
+    list_add_tail(&new_mq->list, &mqueue_list);
 
     /* Register new message queue descriptor */
     bitmap_set_bit(bitmap_mqds, mqdes);
@@ -2156,7 +2156,7 @@ static ssize_t sys_mq_timedreceive(mqd_t mqdes,
 
         running_thread->syscall_is_timeout = false;
         running_thread->syscall_timeout = *abstime;
-        list_add(&running_thread->timeout_list, &timeout_list);
+        list_add_tail(&running_thread->timeout_list, &timeout_list);
 
         schedule();
 
@@ -2280,7 +2280,7 @@ static int sys_mq_timedsend(mqd_t mqdes,
 
         running_thread->syscall_is_timeout = false;
         running_thread->syscall_timeout = *abstime;
-        list_add(&running_thread->timeout_list, &timeout_list);
+        list_add_tail(&running_thread->timeout_list, &timeout_list);
 
         schedule();
 
@@ -2330,7 +2330,7 @@ static int sys_pthread_create(pthread_t *pthread,
 
         /* Set task ownership to the thread */
         thread->task = current_task_info();
-        list_add(&thread->task_list, &current_task_info()->threads_list);
+        list_add_tail(&thread->task_list, &current_task_info()->threads_list);
 
         /* Return thread ID */
         *pthread = thread->tid;
@@ -2378,7 +2378,7 @@ static int sys_pthread_join(pthread_t tid, void **pthread_retval)
 
     running_thread->retval_join = pthread_retval;
 
-    list_add(&running_thread->list, &thread->join_list);
+    list_add_tail(&running_thread->list, &thread->join_list);
     running_thread->status = THREAD_WAIT;
 
     /* Return success */
@@ -2693,7 +2693,7 @@ void thread_inherit_priority(struct mutex *mutex)
             struct thread_info *thread =
                 list_entry(curr, struct thread_info, list);
             if (thread == mutex->owner) {
-                list_move(&thread->list, &ready_list[new_priority]);
+                list_move_tail(&thread->list, &ready_list[new_priority]);
             }
         }
 
@@ -2761,7 +2761,7 @@ static int sys_pthread_mutex_timedlock(pthread_mutex_t *mutex,
         preempt_disable();
         running_thread->syscall_is_timeout = false;
         running_thread->syscall_timeout = *abstime;
-        list_add(&running_thread->timeout_list, &timeout_list);
+        list_add_tail(&running_thread->timeout_list, &timeout_list);
         preempt_enable();
 
         schedule();
@@ -2841,7 +2841,7 @@ static int sys_pthread_cond_timedwait(pthread_cond_t *cond,
     preempt_disable();
     running_thread->syscall_is_timeout = false;
     running_thread->syscall_timeout = *abstime;
-    list_add(&running_thread->timeout_list, &timeout_list);
+    list_add_tail(&running_thread->timeout_list, &timeout_list);
 
     prepare_to_wait(&((struct cond *) cond)->task_wait_list, running_thread,
                     THREAD_WAIT);
@@ -2932,7 +2932,7 @@ static int sys_sem_timedwait(sem_t *sem, const struct timespec *abstime)
 
     running_thread->syscall_is_timeout = false;
     running_thread->syscall_timeout = *abstime;
-    list_add(&running_thread->timeout_list, &timeout_list);
+    list_add_tail(&running_thread->timeout_list, &timeout_list);
 
     while (ksem->count <= 0) {
         prepare_to_wait(&ksem->wait_list, running_thread, THREAD_WAIT);
@@ -3149,7 +3149,7 @@ static int sys_sigtimedwait(const sigset_t *set,
     if (timeout) {
         running_thread->syscall_is_timeout = false;
         running_thread->syscall_timeout = abstime;
-        list_add(&running_thread->timeout_list, &timeout_list);
+        list_add_tail(&running_thread->timeout_list, &timeout_list);
     }
 
     prepare_to_wait(&suspend_list, running_thread, THREAD_WAIT);
@@ -3363,8 +3363,8 @@ static int sys_timer_create(clockid_t clockid,
         INIT_LIST_HEAD(&running_thread->timers_list);
 
     /* Link the new timer to the list */
-    list_add(&new_tm->g_list, &timers_list);
-    list_add(&new_tm->list, &running_thread->timers_list);
+    list_add_tail(&new_tm->g_list, &timers_list);
+    list_add_tail(&new_tm->list, &running_thread->timers_list);
 
     /* Return timer ID */
     *timerid = running_thread->timer_cnt;
@@ -3773,7 +3773,7 @@ static void __schedule(void)
 
         /* Enqueue the thread into the ready list if it is ready */
         if (thread->sleep_ticks == 0) {
-            list_move(curr, &ready_list[thread->priority]);
+            list_move_tail(curr, &ready_list[thread->priority]);
             thread->status = THREAD_READY;
         }
     }

@@ -419,6 +419,8 @@ Tenok API List
 
 * list_add()
 
+* list_add_tail()
+
 * list_del()
 
 * list_del_init()
@@ -427,7 +429,9 @@ Tenok API List
 
 * list_is_last()
 
-* list_move() 
+* list_move()
+
+* list_move_tail() 
 
 * list_entry()
 

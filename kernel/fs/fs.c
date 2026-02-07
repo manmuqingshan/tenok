@@ -525,7 +525,7 @@ static struct inode *fs_add_file(struct inode *inode_dir,
         inode_dir->i_data = (uint32_t) new_dentry; /* Add first dentry */
 
     /* insert the new file under the directory */
-    list_add(&new_dentry->d_list, &inode_dir->i_dentry);
+    list_add_tail(&new_dentry->d_list, &inode_dir->i_dentry);
 
     /* Update the inode size and block information */
     inode_dir->i_size += sizeof(struct dentry);
@@ -576,7 +576,7 @@ static struct inode *fs_mount_file(struct inode *inode_dir,
     mount_points[RDEV_ROOTFS].super_blk.s_inode_cnt++;
 
     /* Insert the new file under current directory */
-    list_add(&new_dentry->d_list, &inode_dir->i_dentry);
+    list_add_tail(&new_dentry->d_list, &inode_dir->i_dentry);
 
     /* Update the inode size and block information */
     inode_dir->i_size += sizeof(struct dentry);

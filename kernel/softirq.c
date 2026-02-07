@@ -24,7 +24,7 @@ void tasklet_init(struct tasklet_struct *t,
 void tasklet_schedule(struct tasklet_struct *t)
 {
     /* Enqueue the tasklet into the list */
-    list_move(&t->list, &tasklet_list);
+    list_move_tail(&t->list, &tasklet_list);
 
     /* Wake up the SoftIRQ daemon */
     int softirqd_tid = get_daemon_id(SOFTIRQD);

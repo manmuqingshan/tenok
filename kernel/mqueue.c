@@ -51,7 +51,7 @@ struct mqueue *__mq_allocate(struct mq_attr *attr)
     for (int i = 0; i < new_mq->size; i++) {
         struct mqueue_data *entry =
             (struct mqueue_data *) ((uintptr_t) buf + (i * element_size));
-        list_add(&entry->list, &new_mq->free_list);
+        list_add_tail(&entry->list, &new_mq->free_list);
     }
 
     /* Return the allocated message queue */
@@ -94,7 +94,7 @@ static size_t __mq_out(struct mqueue *mq, char *msg_ptr, unsigned int *msg_prio)
         *msg_prio = prio;
 
     /* Move the message from used list to the free list */
-    list_move(&element->list, &mq->free_list);
+    list_move_tail(&element->list, &mq->free_list);
 
     /* Return the read size */
     return element->size;
@@ -113,7 +113,7 @@ static void __mq_in(struct mqueue *mq,
     mq->cnt++;
 
     /* Move the message from free list to the used list */
-    list_move(&element->list, &mq->used_list[msg_prio]);
+    list_move_tail(&element->list, &mq->used_list[msg_prio]);
 }
 
 ssize_t __mq_receive(struct mqueue *mq,

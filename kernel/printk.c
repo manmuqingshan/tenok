@@ -49,12 +49,12 @@ ssize_t console_write(const char *buf, size_t size)
         entry = list_first_entry(&printk_wait_list, struct printk_data, list);
         /* Move the buffer to the end of the wait queue */
         list_del(&entry->list);
-        list_add(&entry->list, &printk_wait_list);
+        list_add_tail(&entry->list, &printk_wait_list);
     } else {
         /* Yes, take one buffer from the free queue */
         entry = list_first_entry(&printk_free_list, struct printk_data, list);
         /* Move the buffer to the wait queue */
-        list_move(&entry->list, &printk_wait_list);
+        list_move_tail(&entry->list, &printk_wait_list);
     }
 
     /* Copy write message to the prink buffer */
@@ -121,7 +121,7 @@ void printkd_init(void)
 {
     /* Place all prink buffers to the free queue */
     for (int i = 0; i < PRINTK_QUEUE_SIZE; i++)
-        list_add(&printk_buf[i].list, &printk_free_list);
+        list_add_tail(&printk_buf[i].list, &printk_free_list);
 }
 
 void printkd_start(void)
@@ -172,7 +172,7 @@ void printkd(void)
 
             /* Place the used buffer back to the free queue */
             preempt_disable();
-            list_add(&entry->list, &printk_free_list);
+            list_add_tail(&entry->list, &printk_free_list);
             preempt_enable();
         }
     }

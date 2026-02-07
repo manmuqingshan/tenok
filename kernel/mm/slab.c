@@ -80,7 +80,7 @@ struct kmem_cache *kmem_cache_create(const char *name,
     INIT_LIST_HEAD(&cache->slabs_free);
     INIT_LIST_HEAD(&cache->slabs_partial);
     INIT_LIST_HEAD(&cache->slabs_full);
-    list_add(&cache->list, &caches);
+    list_add_tail(&cache->list, &caches);
 
     return cache;
 }
@@ -98,7 +98,7 @@ static struct slab *kmem_cache_grow(struct kmem_cache *cache)
     /* Initialize the new slab */
     slab->free_bitmap[0] = 0;
     slab->free_objects = cache->objnum;
-    list_add(&slab->list, &cache->slabs_free);
+    list_add_tail(&slab->list, &cache->slabs_free);
 
     /* Return the address of new slab */
     return slab;
@@ -128,7 +128,7 @@ void *kmem_cache_alloc(struct kmem_cache *cache, unsigned long flags)
         }
 
         /* Move the slab into the partial list */
-        list_move(&slab->list, &cache->slabs_partial);
+        list_move_tail(&slab->list, &cache->slabs_partial);
     } else {
         /* Yes, obtain the slab from the partial list */
         cache->alloc_succeed++;
@@ -148,7 +148,7 @@ void *kmem_cache_alloc(struct kmem_cache *cache, unsigned long flags)
     /* Move the slab into the full list if the page has no space for
      * more new slabs */
     if (!slab->free_objects) {
-        list_move(&slab->list, &cache->slabs_full);
+        list_move_tail(&slab->list, &cache->slabs_full);
     }
     /* Return the address of the allocated slab memory */
     return mem;
@@ -184,14 +184,14 @@ void kmem_cache_free(struct kmem_cache *cache, void *obj)
         slab_destroy(cache, slab);
     } else if (slab->free_objects == 1) {
         /* Move the slab from full list into the partial list */
-        list_move(&slab->list, &cache->slabs_partial);
+        list_move_tail(&slab->list, &cache->slabs_partial);
     }
 }
 
 void kmem_cache_init(void)
 {
     /* Add the cache-cache into the cache list */
-    list_add(&cache_caches.list, &caches);
+    list_add_tail(&cache_caches.list, &caches);
 
     /* Allocate space for the cache-cache */
     kmem_cache_grow(&cache_caches);
