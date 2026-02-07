@@ -19,13 +19,17 @@ static int serial_fd = 0;
 void shell_serial_init(void)
 {
     serial_fd = open("/dev/console", O_RDWR);
+    if (serial_fd < 0)
+        serial_fd = 0;
 }
 
-char shell_getc(void)
+int shell_getc(void)
 {
     char c;
-    read(serial_fd, &c, 1);
-    return c;
+    int ret = read(serial_fd, &c, 1);
+    if (ret != 1)
+        return -1;
+    return (unsigned char) c;
 }
 
 void shell_puts(char *s)
@@ -110,6 +114,7 @@ void shell_init_minimal(struct shell *shell)
 void shell_set_prompt(struct shell *shell, char *new_prompt)
 {
     strncpy(shell->prompt, new_prompt, LINE_MAX - 1);
+    shell->prompt[LINE_MAX - 1] = '\0';
     shell->prompt_len = strlen(shell->prompt);
 }
 
@@ -138,7 +143,7 @@ static void shell_remove_char(struct shell *shell, int remove_pos)
 static void shell_insert_char(struct shell *shell, char c)
 {
     int i;
-    for (i = shell->char_cnt; i > (shell->cursor_pos - 1); i--) {
+    for (i = shell->char_cnt; i > shell->cursor_pos; i--) {
         shell->buf[i] = shell->buf[i - 1];
     }
     shell->char_cnt++;
@@ -516,6 +521,10 @@ void shell_listen(struct shell *shell)
     while (1) {
         c = shell_getc();
 
+        if (c < 0) {
+            continue;
+        }
+
         switch (c) {
         case NULL_CH:
             break;
@@ -539,6 +548,7 @@ void shell_listen(struct shell *shell)
         case CTRL_G:
             break;
         case CTRL_H:
+            shell_backspace_handler(shell);
             break;
         case TAB:
             shell_autocomplete(shell);
@@ -650,6 +660,9 @@ static int shell_split_cmd_token(char *cmd, char *argv[])
         i++;
     }
 
+    if (i == len)
+        return 0;
+
     /* Get the first argument */
     argv[0] = &cmd[i];
     int argc = 1;
@@ -687,6 +700,11 @@ void shell_execute(struct shell *shell)
 
     char *argv[SHELL_ARG_CNT] = {0};
     int argc = shell_split_cmd_token(shell->buf, argv);
+    if (argc == 0) {
+        shell->buf[0] = '\0';
+        shell_reset_line(shell);
+        return;
+    }
 
     int i;
     for (i = 0; i < shell->cmd_cnt; i++) {
