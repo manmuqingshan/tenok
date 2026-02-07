@@ -89,7 +89,7 @@ int up(struct semaphore *sem)
 int sem_init(sem_t *sem, int pshared, unsigned int value)
 {
     if (!sem)
-        return -ENOMEM;
+        return -EINVAL;
 
     sema_init((struct semaphore *) sem, value);
     return 0;
@@ -98,7 +98,7 @@ int sem_init(sem_t *sem, int pshared, unsigned int value)
 int sem_destroy(sem_t *sem)
 {
     if (!sem)
-        return -ENOMEM;
+        return -EINVAL;
 
     memset(sem, 0, sizeof(sem_t));
     return 0;

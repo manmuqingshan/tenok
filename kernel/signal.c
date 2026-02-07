@@ -61,18 +61,27 @@ int get_signal_index(int signum)
 
 int sigemptyset(sigset_t *set)
 {
+    if (!set)
+        return -EINVAL;
+
     *set = 0;
     return 0;
 }
 
 int sigfillset(sigset_t *set)
 {
+    if (!set)
+        return -EINVAL;
+
     *set = 0xffffffff;
     return 0;
 }
 
 int sigaddset(sigset_t *set, int signum)
 {
+    if (!set)
+        return -EINVAL;
+
     if (!is_signal_defined(signum)) {
         return -EINVAL;
     }
@@ -83,18 +92,27 @@ int sigaddset(sigset_t *set, int signum)
 
 int sigdelset(sigset_t *set, int signum)
 {
+    if (!set)
+        return -EINVAL;
+
     if (!is_signal_defined(signum)) {
         return -EINVAL;
     }
 
-    *set &= sig2bit(signum);
+    *set &= ~sig2bit(signum);
     return 0;
 }
 
 int sigismember(const sigset_t *set, int signum)
 {
+    if (!set)
+        return -EINVAL;
+
+    if (!is_signal_defined(signum))
+        return -EINVAL;
+
     int mask = sig2bit(signum);
-    return (*set & mask) ? 0 : -EINVAL;
+    return (*set & mask) ? 1 : 0;
 }
 
 NACKED int sigaction(int signum,

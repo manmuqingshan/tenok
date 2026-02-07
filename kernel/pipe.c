@@ -123,10 +123,10 @@ ssize_t fifo_read(struct file *filp, char *buf, size_t size, off_t offset)
     /* Update file events */
     struct pipe *pipe = container_of(filp, struct pipe, file);
     if (kfifo_len(pipe->fifo) > 0) {
-        filp->f_events |= POLLOUT;
+        filp->f_events |= POLLIN;
         poll_notify(filp);
     } else {
-        filp->f_events &= ~POLLOUT;
+        filp->f_events &= ~POLLIN;
     }
 
     preempt_enable();
@@ -146,10 +146,10 @@ ssize_t fifo_write(struct file *filp,
     /* Update file events */
     struct pipe *pipe = container_of(filp, struct pipe, file);
     if (kfifo_avail(pipe->fifo) > 0) {
-        filp->f_events |= POLLIN;
+        filp->f_events |= POLLOUT;
         poll_notify(filp);
     } else {
-        filp->f_events &= ~POLLIN;
+        filp->f_events &= ~POLLOUT;
     }
 
     preempt_enable();

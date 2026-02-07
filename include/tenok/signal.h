@@ -6,6 +6,8 @@
 
 #include <sys/types.h>
 
+struct timespec;
+
 #define SIGUSR1 10
 #define SIGUSR2 12
 #define SIGPOLL 29
@@ -111,6 +113,25 @@ int sigaction(int signum,
  * @retval int: 0 on success and nonzero error number on error.
  */
 int sigwait(const sigset_t *set, int *sig);
+
+/**
+ * @brief  Wait for a signal and return siginfo
+ * @param  set: Pointer to the signal set.
+ * @param  info: For returning signal info (optional).
+ * @retval int: The signal number on success and nonzero error number on error.
+ */
+int sigwaitinfo(const sigset_t *set, siginfo_t *info);
+
+/**
+ * @brief  Wait for a signal with timeout
+ * @param  set: Pointer to the signal set.
+ * @param  info: For returning signal info (optional).
+ * @param  timeout: Relative timeout.
+ * @retval int: The signal number on success and nonzero error number on error.
+ */
+int sigtimedwait(const sigset_t *set,
+                 siginfo_t *info,
+                 const struct timespec *timeout);
 
 /**
  * @brief  To cause the calling task (or thread) to sleep until a signal is

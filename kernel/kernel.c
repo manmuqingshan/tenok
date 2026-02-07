@@ -946,6 +946,11 @@ static int sys_open(const char *pathname, int flags)
 
     int retval;
 
+    if (!pathname) {
+        retval = -EFAULT;
+        goto err;
+    }
+
     /* Check the length of the pathname */
     if (strlen(pathname) >= PATH_MAX) {
         retval = -ENAMETOOLONG;
@@ -985,7 +990,7 @@ static int sys_open(const char *pathname, int flags)
     int fdesc_idx = find_first_zero_bit(bitmap_fds, OPEN_MAX);
     if (fdesc_idx >= OPEN_MAX) {
         /* Return error */
-        retval = -ENOMEM;
+        retval = -ENFILE;
         goto err;
     }
     bitmap_set_bit(bitmap_fds, fdesc_idx);
@@ -1087,7 +1092,7 @@ static int sys_dup(int oldfd)
     /* Find a free entry on the file descriptor table */
     int fdesc_idx = find_first_zero_bit(bitmap_fds, OPEN_MAX);
     if (fdesc_idx >= OPEN_MAX) {
-        retval = -ENOMEM;
+        retval = -ENFILE;
         goto leave;
     }
     bitmap_set_bit(bitmap_fds, fdesc_idx);
@@ -1110,11 +1115,31 @@ static int sys_dup2(int oldfd, int newfd)
 
     int retval;
 
+    if (oldfd == newfd) {
+        /* Validate oldfd */
+        int idx = oldfd - FILE_RESERVED_NUM;
+        if (oldfd < FILE_RESERVED_NUM || idx < 0 || idx >= OPEN_MAX) {
+            retval = -EBADF;
+            goto leave;
+        }
+
+        struct task_struct *task = current_task_info();
+        if (!bitmap_get_bit(bitmap_fds, idx) ||
+            !bitmap_get_bit(task->bitmap_fds, idx)) {
+            retval = -EBADF;
+            goto leave;
+        }
+
+        retval = newfd;
+        goto leave;
+    }
+
     /* Convert fds to the index numbers on the table */
     int old_fdesc_idx = oldfd - FILE_RESERVED_NUM;
     int new_fdesc_idx = newfd - FILE_RESERVED_NUM;
 
-    if (oldfd < FILE_RESERVED_NUM || newfd < FILE_RESERVED_NUM) {
+    if (oldfd < FILE_RESERVED_NUM || newfd < FILE_RESERVED_NUM ||
+        old_fdesc_idx < 0 || new_fdesc_idx < 0 || new_fdesc_idx >= OPEN_MAX) {
         retval = -EBADF;
         goto leave;
     }
@@ -1124,12 +1149,21 @@ static int sys_dup2(int oldfd, int newfd)
 
     /* Check if the file descriptors are invalid */
     if (!bitmap_get_bit(bitmap_fds, old_fdesc_idx) ||
-        !bitmap_get_bit(bitmap_fds, new_fdesc_idx) ||
-        !bitmap_get_bit(task->bitmap_fds, old_fdesc_idx) ||
-        !bitmap_get_bit(task->bitmap_fds, new_fdesc_idx)) {
+        !bitmap_get_bit(task->bitmap_fds, old_fdesc_idx)) {
         retval = -EBADF;
         goto leave;
     }
+
+    /* Close newfd if it is open */
+    if (bitmap_get_bit(bitmap_fds, new_fdesc_idx) &&
+        bitmap_get_bit(task->bitmap_fds, new_fdesc_idx)) {
+        bitmap_clear_bit(bitmap_fds, new_fdesc_idx);
+        bitmap_clear_bit(task->bitmap_fds, new_fdesc_idx);
+    }
+
+    /* Mark newfd as open */
+    bitmap_set_bit(bitmap_fds, new_fdesc_idx);
+    bitmap_set_bit(task->bitmap_fds, new_fdesc_idx);
 
     /* Copy the old file descriptor content to the new one */
     fdtable[new_fdesc_idx] = fdtable[old_fdesc_idx];
@@ -1147,6 +1181,11 @@ static ssize_t sys_read(int fd, void *buf, size_t count)
     ssize_t retval;
 
     preempt_disable();
+
+    if (!buf && count > 0) {
+        retval = -EFAULT;
+        goto err;
+    }
 
     /* Acquire the running task */
     struct task_struct *task = current_task_info();
@@ -1203,6 +1242,11 @@ static ssize_t sys_write(int fd, const void *buf, size_t count)
     ssize_t retval;
 
     preempt_disable();
+
+    if (!buf && count > 0) {
+        retval = -EFAULT;
+        goto err;
+    }
 
     /* Acquire the running task */
     struct task_struct *task = current_task_info();
@@ -1370,6 +1414,11 @@ static int sys_fstat(int fd, struct stat *statbuf)
 
     int retval;
 
+    if (!statbuf) {
+        retval = -EFAULT;
+        goto leave;
+    }
+
     /* Acquire the running task */
     struct task_struct *task = current_task_info();
 
@@ -1411,6 +1460,9 @@ leave:
 
 static int sys_opendir(const char *pathname, DIR *dirp /* FIXME */)
 {
+    if (!pathname || !dirp)
+        return -EFAULT;
+
     /* Check the length of the pathname */
     if (strlen(pathname) >= PATH_MAX)
         return -ENAMETOOLONG;
@@ -1443,6 +1495,9 @@ static int sys_opendir(const char *pathname, DIR *dirp /* FIXME */)
 
 static int sys_readdir(DIR *dirp, struct dirent *dirent)
 {
+    if (!dirp || !dirent)
+        return -EFAULT;
+
     preempt_disable();
     int retval = fs_read_dir(dirp, dirent);
     preempt_enable();
@@ -1550,7 +1605,7 @@ static int sys_mkfifo(const char *pathname, mode_t mode)
     int file_idx = 0;
     int fifo_retval;
     while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &tid,
+        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &file_idx,
                                 sizeof(file_idx), 0);
 
         if (fifo_retval != -ERESTARTSYS)
@@ -1589,6 +1644,15 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
     preempt_disable();
 
     int retval;
+    int ready = 0;
+
+    if (!fds && nfds > 0) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    /* Reset timeout flag */
+    running_thread->syscall_is_timeout = false;
 
     /* Set polling deadline */
     if (timeout > 0) {
@@ -1603,31 +1667,49 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 
     /* Check file events */
     struct file *filp;
-    bool no_event = true;
+    struct task_struct *task = current_task_info();
 
     for (int i = 0; i < nfds; i++) {
-        int fd = fds[i].fd - FILE_RESERVED_NUM;
-        filp = fdtable[fd].file;
+        fds[i].revents = 0;
 
-        uint32_t events = filp->f_events;
-        if (~fds[i].events & events) {
-            no_event = false;
+        int fd = fds[i].fd;
+        if (fd < 0) {
+            continue; /* Ignore */
+        } else if (fd < FILE_RESERVED_NUM) {
+            filp = files[fd];
+            if (!filp) {
+                fds[i].revents |= POLLNVAL;
+                ready++;
+                continue;
+            }
+        } else {
+            int fdesc_idx = fd - FILE_RESERVED_NUM;
+            if (fdesc_idx < 0 || fdesc_idx >= OPEN_MAX ||
+                !bitmap_get_bit(bitmap_fds, fdesc_idx) ||
+                !bitmap_get_bit(task->bitmap_fds, fdesc_idx)) {
+                fds[i].revents |= POLLNVAL;
+                ready++;
+                continue;
+            }
+
+            filp = fdtable[fdesc_idx].file;
         }
-
-        /* Return file events */
-        fds[i].revents |= events;
+        uint32_t events = filp->f_events & fds[i].events;
+        if (events) {
+            fds[i].revents |= events;
+            ready++;
+        }
     }
 
-    if (!no_event) {
-        /* Return success */
-        retval = 0;
+    if (ready > 0) {
+        /* Return number of fds with events */
+        retval = ready;
         goto leave;
     }
 
     /* No events is observed and no timeout is set, return immediately */
     if (timeout == 0) {
-        /* return error */
-        retval = -1; /* TODO: Specify the failed reason */
+        retval = 0;
         goto leave;
     }
 
@@ -1640,8 +1722,25 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 
     /* Record all files for polling */
     for (int i = 0; i < nfds; i++) {
-        int fd = fds[i].fd - FILE_RESERVED_NUM;
-        filp = fdtable[fd].file;
+        int fd = fds[i].fd;
+        if (fd < 0)
+            continue;
+
+        if (fd < FILE_RESERVED_NUM) {
+            filp = files[fd];
+            if (!filp)
+                continue;
+        } else {
+            int fdesc_idx = fd - FILE_RESERVED_NUM;
+            if (fdesc_idx < 0 || fdesc_idx >= OPEN_MAX ||
+                !bitmap_get_bit(bitmap_fds, fdesc_idx) ||
+                !bitmap_get_bit(task->bitmap_fds, fdesc_idx)) {
+                continue;
+            }
+
+            filp = fdtable[fdesc_idx].file;
+        }
+
         list_add(&filp->list, &running_thread->poll_files_list);
     }
 
@@ -1655,8 +1754,45 @@ static int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout)
     if (timeout > 0)
         list_del(&running_thread->timeout_list);
 
-    /* TODO: Specify the failed reason */
-    retval = (running_thread->syscall_is_timeout) ? -1 : 0;
+    if (running_thread->syscall_is_timeout) {
+        retval = 0;
+        goto leave;
+    }
+
+    ready = 0;
+    for (int i = 0; i < nfds; i++) {
+        fds[i].revents = 0;
+
+        int fd = fds[i].fd;
+        if (fd < 0) {
+            continue; /* Ignore */
+        } else if (fd < FILE_RESERVED_NUM) {
+            filp = files[fd];
+            if (!filp) {
+                fds[i].revents |= POLLNVAL;
+                ready++;
+                continue;
+            }
+        } else {
+            int fdesc_idx = fd - FILE_RESERVED_NUM;
+            if (fdesc_idx < 0 || fdesc_idx >= OPEN_MAX ||
+                !bitmap_get_bit(bitmap_fds, fdesc_idx) ||
+                !bitmap_get_bit(task->bitmap_fds, fdesc_idx)) {
+                fds[i].revents |= POLLNVAL;
+                ready++;
+                continue;
+            }
+
+            filp = fdtable[fdesc_idx].file;
+        }
+        uint32_t events = filp->f_events & fds[i].events;
+        if (events) {
+            fds[i].revents |= events;
+            ready++;
+        }
+    }
+
+    retval = ready;
 
 leave:
     preempt_enable();
@@ -1699,6 +1835,11 @@ static int sys_mq_setattr(mqd_t mqdes,
 
     int retval;
 
+    if (!newattr) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
     struct task_struct *task = current_task_info();
     if (!bitmap_get_bit(bitmap_mqds, mqdes) ||
         !bitmap_get_bit(task->bitmap_mqds, mqdes)) {
@@ -1719,13 +1860,15 @@ static int sys_mq_setattr(mqd_t mqdes,
     }
 
     /* Preserve old attributes */
-    oldattr->mq_flags = curr_attr->mq_flags;
-    oldattr->mq_maxmsg = curr_attr->mq_maxmsg;
-    oldattr->mq_msgsize = curr_attr->mq_msgsize;
-    oldattr->mq_curmsgs = __mq_len(mqd_table[mqdes].mq);
+    if (oldattr) {
+        oldattr->mq_flags = curr_attr->mq_flags;
+        oldattr->mq_maxmsg = curr_attr->mq_maxmsg;
+        oldattr->mq_msgsize = curr_attr->mq_msgsize;
+        oldattr->mq_curmsgs = __mq_len(mqd_table[mqdes].mq);
+    }
 
     /* Save new mq_flags attribute */
-    curr_attr->mq_flags = (~O_NONBLOCK) & newattr->mq_flags;
+    curr_attr->mq_flags = newattr->mq_flags & O_NONBLOCK;
 
     /* Return success */
     retval = 0;
@@ -1753,6 +1896,16 @@ static mqd_t sys_mq_open(const char *name, int oflag, struct mq_attr *attr)
     preempt_disable();
 
     mqd_t retval;
+
+    if (!name) {
+        retval = -EFAULT;
+        goto leave;
+    }
+
+    if (strlen(name) >= NAME_MAX) {
+        retval = -ENAMETOOLONG;
+        goto leave;
+    }
 
     /* Acquire the running task */
     struct task_struct *task = current_task_info();
@@ -1790,7 +1943,7 @@ static mqd_t sys_mq_open(const char *name, int oflag, struct mq_attr *attr)
         bitmap_set_bit(task->bitmap_mqds, mqdes);
         mqd_table[mqdes].mq = mq;
         mqd_table[mqdes].attr = *attr;
-        mqd_table[mqdes].attr.mq_flags = oflag;
+        mqd_table[mqdes].attr.mq_flags = oflag & O_NONBLOCK;
 
         /* Return message queue descriptor */
         retval = mqdes;
@@ -1824,7 +1977,7 @@ static mqd_t sys_mq_open(const char *name, int oflag, struct mq_attr *attr)
     bitmap_set_bit(task->bitmap_mqds, mqdes);
     mqd_table[mqdes].mq = new_mq;
     mqd_table[mqdes].attr = *attr;
-    mqd_table[mqdes].attr.mq_flags = oflag;
+    mqd_table[mqdes].attr.mq_flags = oflag & O_NONBLOCK;
 
     /* Return the message queue descriptor */
     retval = mqdes;
@@ -1901,6 +2054,11 @@ static ssize_t sys_mq_receive(mqd_t mqdes,
 
     ssize_t retval;
 
+    if (!msg_ptr) {
+        retval = -EFAULT;
+        goto leave;
+    }
+
     /* Check if the message queue descriptor is invalid */
     struct task_struct *task = current_task_info();
     if (!bitmap_get_bit(bitmap_mqds, mqdes) ||
@@ -1942,6 +2100,11 @@ static int sys_mq_send(mqd_t mqdes,
     preempt_disable();
 
     int retval;
+
+    if (!msg_ptr) {
+        retval = -EFAULT;
+        goto leave;
+    }
 
     /* Check if the message priority exceeds the max value */
     if (msg_prio > MQ_PRIO_MAX) {
@@ -1988,6 +2151,11 @@ static int sys_pthread_create(pthread_t *pthread,
                               void *arg)
 {
     preempt_disable();
+
+    if (!pthread || !start_routine) {
+        preempt_enable();
+        return -EINVAL;
+    }
 
     struct thread_attr *attr = (struct thread_attr *) _attr;
 
@@ -2130,6 +2298,11 @@ static int sys_pthread_setschedparam(pthread_t tid,
 
     int retval;
 
+    if (!param) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
     struct thread_info *thread = acquire_thread(tid);
     if (!thread) {
         /* Return error */
@@ -2174,6 +2347,11 @@ static int sys_pthread_getschedparam(pthread_t tid,
 
     int retval;
 
+    if (!param || !policy) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
     struct thread_info *thread = acquire_thread(tid);
     if (!thread) {
         /* Return error */
@@ -2189,6 +2367,7 @@ static int sys_pthread_getschedparam(pthread_t tid,
     }
 
     /* Return settings */
+    *policy = SCHED_RR;
     if (thread->priority_inherited)
         param->sched_priority = thread->original_priority;
     else
@@ -2417,19 +2596,28 @@ static int sys_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
     preempt_disable();
 
-    if (((struct mutex *) mutex)->owner) {
-        /* Release the mutex */
-        ((struct mutex *) mutex)->owner = NULL;
-
-        /* Enqueue current thread into the read waiting list */
-        prepare_to_wait(&((struct cond *) cond)->task_wait_list, running_thread,
-                        THREAD_WAIT);
+    if (!cond || !mutex) {
+        preempt_enable();
+        return -EINVAL;
     }
+
+    int retval = mutex_unlock((struct mutex *) mutex);
+    if (retval != 0) {
+        preempt_enable();
+        return retval;
+    }
+
+    /* Enqueue current thread into the wait list */
+    prepare_to_wait(&((struct cond *) cond)->task_wait_list, running_thread,
+                    THREAD_WAIT);
 
     preempt_enable();
 
-    /* Return success */
-    return 0;
+    /* Block until signaled */
+    schedule();
+
+    /* Reacquire the mutex before returning */
+    return mutex_lock((struct mutex *) mutex);
 }
 
 static int sys_pthread_once(pthread_once_t *_once_control,
@@ -2479,6 +2667,12 @@ static int sys_sem_wait(sem_t *sem)
 static int sys_sem_getvalue(sem_t *sem, int *sval)
 {
     preempt_disable();
+
+    if (!sem || !sval) {
+        preempt_enable();
+        return -EINVAL;
+    }
+
     *sval = ((struct semaphore *) sem)->count;
     preempt_enable();
 
@@ -2505,18 +2699,23 @@ static int sys_sigaction(int signum,
     int sig_idx = get_signal_index(signum);
     struct sigaction *sig_entry = running_thread->sig_table[sig_idx];
 
+    /* Preserve old signal action if requested */
+    if (oldact && sig_entry)
+        *oldact = *sig_entry;
+
+    /* If act is NULL, only query old action */
+    if (!act) {
+        retval = 0;
+        goto leave;
+    }
+
     /* Has the signal action already been registered on the table? */
     if (sig_entry) {
-        /* Preserve old signal action */
-        if (oldact) {
-            *oldact = *sig_entry;
-        }
-
         /* Replace old signal action */
         *sig_entry = *act;
     } else {
         /* Allocate memory for new action */
-        struct sigaction *new_act = kmalloc(sizeof(act));
+        struct sigaction *new_act = kmalloc(sizeof(*new_act));
 
         /* Failed to allocate memory */
         if (new_act == NULL) {
@@ -2543,6 +2742,11 @@ static int sys_sigwait(const sigset_t *set, int *sig)
     preempt_disable();
 
     int retval;
+
+    if (!set || !sig) {
+        retval = -EINVAL;
+        goto leave;
+    }
 
     sigset_t invalid_mask =
         ~(sig2bit(SIGUSR1) | sig2bit(SIGUSR2) | sig2bit(SIGPOLL) |
@@ -2651,6 +2855,11 @@ static int sys_clock_gettime(clockid_t clockid, struct timespec *tp)
 
     int retval;
 
+    if (!tp) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
     if (clockid != CLOCK_MONOTONIC) {
         /* Return error */
         retval = -EINVAL;
@@ -2672,6 +2881,11 @@ static int sys_clock_settime(clockid_t clockid, const struct timespec *tp)
     preempt_disable();
 
     int retval;
+
+    if (!tp) {
+        retval = -EINVAL;
+        goto leave;
+    }
 
     if (clockid != CLOCK_MONOTONIC) {
         /* Return error */
@@ -2713,6 +2927,11 @@ static int sys_timer_create(clockid_t clockid,
     /* Unsupported clock source */
     if (clockid != CLOCK_MONOTONIC) {
         /* Return error */
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    if (!sevp) {
         retval = -EINVAL;
         goto leave;
     }
@@ -2800,8 +3019,16 @@ static int sys_timer_settime(timer_t timerid,
     int retval;
 
     /* Bad arguments */
+    if (!new_value) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
     if (new_value->it_value.tv_sec < 0 || new_value->it_value.tv_nsec < 0 ||
-        new_value->it_value.tv_nsec > 999999999) {
+        new_value->it_value.tv_nsec > 999999999 ||
+        new_value->it_interval.tv_sec < 0 ||
+        new_value->it_interval.tv_nsec < 0 ||
+        new_value->it_interval.tv_nsec > 999999999) {
         /* Return error */
         retval = -EINVAL;
         goto leave;
@@ -2850,6 +3077,11 @@ static int sys_timer_gettime(timer_t timerid, struct itimerspec *curr_value)
     preempt_disable();
 
     int retval;
+
+    if (!curr_value) {
+        retval = -EINVAL;
+        goto leave;
+    }
 
     /* Acquire the timer with given ID */
     struct timer *timer = acquire_timer(timerid);
@@ -2958,8 +3190,9 @@ static void syscall_timeout_update(void)
     struct thread_info *thread;
     list_for_each_entry (thread, &timeout_list, timeout_list) {
         /* Wake up the thread if the time is up */
-        if (tp.tv_sec >= thread->syscall_timeout.tv_sec &&
-            tp.tv_nsec >= thread->syscall_timeout.tv_nsec) {
+        if (tp.tv_sec > thread->syscall_timeout.tv_sec ||
+            (tp.tv_sec == thread->syscall_timeout.tv_sec &&
+             tp.tv_nsec >= thread->syscall_timeout.tv_nsec)) {
             thread->syscall_is_timeout = true;
             finish_wait(thread);
         }
