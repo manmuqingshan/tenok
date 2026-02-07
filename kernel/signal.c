@@ -127,6 +127,18 @@ NACKED int sigwait(const sigset_t *set, int *sig)
     SYSCALL(SIGWAIT);
 }
 
+NACKED int sigwaitinfo(const sigset_t *set, siginfo_t *info)
+{
+    SYSCALL(SIGWAITINFO);
+}
+
+NACKED int sigtimedwait(const sigset_t *set,
+                        siginfo_t *info,
+                        const struct timespec *timeout)
+{
+    SYSCALL(SIGTIMEDWAIT);
+}
+
 int pause(void)
 {
     int sig;

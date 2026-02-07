@@ -809,6 +809,22 @@ static int sys_delay_ticks(uint32_t ticks)
     return 0;
 }
 
+static bool timespec_valid(const struct timespec *ts)
+{
+    return ts && ts->tv_sec >= 0 && ts->tv_nsec >= 0 &&
+           ts->tv_nsec < 1000000000L;
+}
+
+static int timespec_cmp(const struct timespec *a, const struct timespec *b)
+{
+    if (a->tv_sec == b->tv_sec) {
+        if (a->tv_nsec == b->tv_nsec)
+            return 0;
+        return (a->tv_nsec > b->tv_nsec) ? 1 : -1;
+    }
+    return (a->tv_sec > b->tv_sec) ? 1 : -1;
+}
+
 static int sys_task_create(task_func_t task_func,
                            uint8_t priority,
                            int stack_size)
@@ -2092,6 +2108,71 @@ leave:
     return retval;
 }
 
+static ssize_t sys_mq_timedreceive(mqd_t mqdes,
+                                   char *msg_ptr,
+                                   size_t msg_len,
+                                   unsigned int *msg_prio,
+                                   const struct timespec *abstime)
+{
+    preempt_disable();
+
+    ssize_t retval;
+
+    if (!msg_ptr || !timespec_valid(abstime)) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    /* Check if the message queue descriptor is invalid */
+    struct task_struct *task = current_task_info();
+    if (!bitmap_get_bit(bitmap_mqds, mqdes) ||
+        !bitmap_get_bit(task->bitmap_mqds, mqdes)) {
+        retval = -EBADF;
+        goto leave;
+    }
+
+    /* Acquire the message queue */
+    struct mqueue *mq = mqd_table[mqdes].mq;
+
+    /* Check if msg_len exceeds maximum size */
+    if (msg_len > mqd_table[mqdes].attr.mq_msgsize) {
+        retval = -EMSGSIZE;
+        goto leave;
+    }
+
+    while (1) {
+        retval = __mq_receive(mq, &mqd_table[mqdes].attr, msg_ptr, msg_len,
+                              msg_prio);
+
+        if (retval != -ERESTARTSYS)
+            break;
+
+        struct timespec now;
+        get_sys_time(&now);
+        if (timespec_cmp(&now, abstime) >= 0) {
+            retval = -ETIMEDOUT;
+            break;
+        }
+
+        running_thread->syscall_is_timeout = false;
+        running_thread->syscall_timeout = *abstime;
+        list_add(&running_thread->timeout_list, &timeout_list);
+
+        schedule();
+
+        list_del(&running_thread->timeout_list);
+
+        if (running_thread->syscall_is_timeout) {
+            retval = -ETIMEDOUT;
+            break;
+        }
+    }
+
+leave:
+    preempt_enable();
+    return retval;
+}
+
 static int sys_mq_send(mqd_t mqdes,
                        const char *msg_ptr,
                        size_t msg_len,
@@ -2138,6 +2219,77 @@ static int sys_mq_send(mqd_t mqdes,
             break;
 
         schedule();
+    }
+
+leave:
+    preempt_enable();
+    return retval;
+}
+
+static int sys_mq_timedsend(mqd_t mqdes,
+                            const char *msg_ptr,
+                            size_t msg_len,
+                            unsigned int msg_prio,
+                            const struct timespec *abstime)
+{
+    preempt_disable();
+
+    int retval;
+
+    if (!msg_ptr || !timespec_valid(abstime)) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    /* Check if the message priority exceeds the max value */
+    if (msg_prio > MQ_PRIO_MAX) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    /* Check if the message queue descriptor is invalid */
+    struct task_struct *task = current_task_info();
+    if (!bitmap_get_bit(bitmap_mqds, mqdes) ||
+        !bitmap_get_bit(task->bitmap_mqds, mqdes)) {
+        retval = -EBADF;
+        goto leave;
+    }
+
+    /* Acquire the message queue */
+    struct mqueue *mq = mqd_table[mqdes].mq;
+
+    /* Check if msg_len exceeds maximum size */
+    if (msg_len > mqd_table[mqdes].attr.mq_msgsize) {
+        retval = -EMSGSIZE;
+        goto leave;
+    }
+
+    while (1) {
+        retval = __mq_send(mq, &mqd_table[mqdes].attr, msg_ptr, msg_len,
+                           msg_prio);
+
+        if (retval != -ERESTARTSYS)
+            break;
+
+        struct timespec now;
+        get_sys_time(&now);
+        if (timespec_cmp(&now, abstime) >= 0) {
+            retval = -ETIMEDOUT;
+            break;
+        }
+
+        running_thread->syscall_is_timeout = false;
+        running_thread->syscall_timeout = *abstime;
+        list_add(&running_thread->timeout_list, &timeout_list);
+
+        schedule();
+
+        list_del(&running_thread->timeout_list);
+
+        if (running_thread->syscall_is_timeout) {
+            retval = -ETIMEDOUT;
+            break;
+        }
     }
 
 leave:
@@ -2402,6 +2554,12 @@ static void handle_signal(struct thread_info *thread, int signum)
         /* Wake up the thread and set the return values */
         finish_wait(thread);
         *thread->ret_sig = signum;
+        if (thread->ret_siginfo) {
+            thread->ret_siginfo->si_signo = signum;
+            thread->ret_siginfo->si_code = 0;
+            thread->ret_siginfo->si_value.sival_int = 0;
+            thread->ret_siginfo = NULL;
+        }
         SYSCALL_ARG(thread, int, 0) = 0;
     }
 
@@ -2574,6 +2732,50 @@ static int sys_pthread_mutex_trylock(pthread_mutex_t *mutex)
     return mutex_trylock((struct mutex *) mutex);
 }
 
+static int sys_pthread_mutex_timedlock(pthread_mutex_t *mutex,
+                                       const struct timespec *abstime)
+{
+    if (!mutex || !timespec_valid(abstime))
+        return -EINVAL;
+
+    struct mutex *mtx = (struct mutex *) mutex;
+
+    while (1) {
+        int retval = mutex_trylock(mtx);
+
+        if (retval == 0) {
+            thread_reset_inherited_priority(mtx);
+            return 0;
+        }
+
+        if (retval != -EBUSY)
+            return retval;
+
+        thread_inherit_priority(mtx);
+
+        struct timespec now;
+        get_sys_time(&now);
+        if (timespec_cmp(&now, abstime) >= 0)
+            return -ETIMEDOUT;
+
+        preempt_disable();
+        running_thread->syscall_is_timeout = false;
+        running_thread->syscall_timeout = *abstime;
+        list_add(&running_thread->timeout_list, &timeout_list);
+        preempt_enable();
+
+        schedule();
+
+        preempt_disable();
+        list_del(&running_thread->timeout_list);
+        bool timeout = running_thread->syscall_is_timeout;
+        preempt_enable();
+
+        if (timeout)
+            return -ETIMEDOUT;
+    }
+}
+
 static int sys_pthread_cond_signal(pthread_cond_t *cond)
 {
     /* Wake up a thread from the wait list */
@@ -2620,6 +2822,48 @@ static int sys_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
     return mutex_lock((struct mutex *) mutex);
 }
 
+static int sys_pthread_cond_timedwait(pthread_cond_t *cond,
+                                      pthread_mutex_t *mutex,
+                                      const struct timespec *abstime)
+{
+    if (!cond || !mutex || !timespec_valid(abstime))
+        return -EINVAL;
+
+    struct timespec now;
+    get_sys_time(&now);
+    if (timespec_cmp(&now, abstime) >= 0)
+        return -ETIMEDOUT;
+
+    int retval = mutex_unlock((struct mutex *) mutex);
+    if (retval != 0)
+        return retval;
+
+    preempt_disable();
+    running_thread->syscall_is_timeout = false;
+    running_thread->syscall_timeout = *abstime;
+    list_add(&running_thread->timeout_list, &timeout_list);
+
+    prepare_to_wait(&((struct cond *) cond)->task_wait_list, running_thread,
+                    THREAD_WAIT);
+    preempt_enable();
+
+    schedule();
+
+    preempt_disable();
+    list_del(&running_thread->timeout_list);
+    bool timeout = running_thread->syscall_is_timeout;
+    preempt_enable();
+
+    retval = mutex_lock((struct mutex *) mutex);
+    if (retval != 0)
+        return retval;
+
+    if (timeout)
+        return -ETIMEDOUT;
+
+    return 0;
+}
+
 static int sys_pthread_once(pthread_once_t *_once_control,
                             void (*init_routine)(void))
 {
@@ -2662,6 +2906,52 @@ static int sys_sem_trywait(sem_t *sem)
 static int sys_sem_wait(sem_t *sem)
 {
     return down((struct semaphore *) sem);
+}
+
+static int sys_sem_timedwait(sem_t *sem, const struct timespec *abstime)
+{
+    if (!sem || !timespec_valid(abstime))
+        return -EINVAL;
+
+    preempt_disable();
+
+    struct semaphore *ksem = (struct semaphore *) sem;
+
+    if (ksem->count > 0) {
+        ksem->count--;
+        preempt_enable();
+        return 0;
+    }
+
+    struct timespec now;
+    get_sys_time(&now);
+    if (timespec_cmp(&now, abstime) >= 0) {
+        preempt_enable();
+        return -ETIMEDOUT;
+    }
+
+    running_thread->syscall_is_timeout = false;
+    running_thread->syscall_timeout = *abstime;
+    list_add(&running_thread->timeout_list, &timeout_list);
+
+    while (ksem->count <= 0) {
+        prepare_to_wait(&ksem->wait_list, running_thread, THREAD_WAIT);
+        schedule();
+
+        if (running_thread->syscall_is_timeout)
+            break;
+    }
+
+    list_del(&running_thread->timeout_list);
+
+    if (running_thread->syscall_is_timeout) {
+        preempt_enable();
+        return -ETIMEDOUT;
+    }
+
+    ksem->count--;
+    preempt_enable();
+    return 0;
 }
 
 static int sys_sem_getvalue(sem_t *sem, int *sval)
@@ -2762,6 +3052,7 @@ static int sys_sigwait(const sigset_t *set, int *sig)
     /* Record the signals to wait */
     running_thread->sig_wait_set = *set;
     running_thread->ret_sig = sig;
+    running_thread->ret_siginfo = NULL;
     running_thread->wait_for_signal = true;
 
     /* Enqueue the thread into the signal waiting list */
@@ -2769,6 +3060,115 @@ static int sys_sigwait(const sigset_t *set, int *sig)
 
     /* Return success */
     retval = 0;
+
+leave:
+    preempt_enable();
+    return retval;
+}
+
+static int sys_sigwaitinfo(const sigset_t *set, siginfo_t *info)
+{
+    preempt_disable();
+
+    int retval;
+
+    if (!set) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    sigset_t invalid_mask =
+        ~(sig2bit(SIGUSR1) | sig2bit(SIGUSR2) | sig2bit(SIGPOLL) |
+          sig2bit(SIGSTOP) | sig2bit(SIGCONT) | sig2bit(SIGKILL));
+
+    if (*set & invalid_mask) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    int sig = 0;
+
+    running_thread->sig_wait_set = *set;
+    running_thread->ret_sig = &sig;
+    running_thread->ret_siginfo = info;
+    running_thread->wait_for_signal = true;
+
+    prepare_to_wait(&suspend_list, running_thread, THREAD_WAIT);
+
+    preempt_enable();
+    schedule();
+    preempt_disable();
+
+    running_thread->ret_siginfo = NULL;
+    retval = sig;
+
+leave:
+    preempt_enable();
+    return retval;
+}
+
+static int sys_sigtimedwait(const sigset_t *set,
+                            siginfo_t *info,
+                            const struct timespec *timeout)
+{
+    preempt_disable();
+
+    int retval;
+
+    if (!set) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    sigset_t invalid_mask =
+        ~(sig2bit(SIGUSR1) | sig2bit(SIGUSR2) | sig2bit(SIGPOLL) |
+          sig2bit(SIGSTOP) | sig2bit(SIGCONT) | sig2bit(SIGKILL));
+
+    if (*set & invalid_mask) {
+        retval = -EINVAL;
+        goto leave;
+    }
+
+    struct timespec abstime;
+    if (timeout) {
+        if (!timespec_valid(timeout)) {
+            retval = -EINVAL;
+            goto leave;
+        }
+        get_sys_time(&abstime);
+        time_add(&abstime, timeout->tv_sec, timeout->tv_nsec);
+    }
+
+    int sig = 0;
+
+    running_thread->sig_wait_set = *set;
+    running_thread->ret_sig = &sig;
+    running_thread->ret_siginfo = info;
+    running_thread->wait_for_signal = true;
+
+    if (timeout) {
+        running_thread->syscall_is_timeout = false;
+        running_thread->syscall_timeout = abstime;
+        list_add(&running_thread->timeout_list, &timeout_list);
+    }
+
+    prepare_to_wait(&suspend_list, running_thread, THREAD_WAIT);
+
+    preempt_enable();
+    schedule();
+    preempt_disable();
+
+    if (timeout)
+        list_del(&running_thread->timeout_list);
+
+    if (timeout && running_thread->syscall_is_timeout) {
+        running_thread->ret_siginfo = NULL;
+        retval = -ETIMEDOUT;
+        goto leave;
+    }
+
+    running_thread->ret_siginfo = NULL;
+    retval = sig;
 
 leave:
     preempt_enable();

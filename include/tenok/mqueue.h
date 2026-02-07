@@ -5,6 +5,7 @@
 #define __MQUEUE_H__
 
 #include <sys/types.h>
+#include <time.h>
 
 #include <common/list.h>
 
@@ -84,5 +85,35 @@ int mq_send(mqd_t mqdes,
             const char *msg_ptr,
             size_t msg_len,
             unsigned int msg_prio);
+
+/**
+ * @brief  Add message with absolute timeout
+ * @param  mqdes: The message queue descriptor to provide.
+ * @param  msg_ptr: The message to send.
+ * @param  msg_len: The size of the message in bytes.
+ * @param  msg_prio: The priority of the message to send.
+ * @param  abs_timeout: Absolute timeout.
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int mq_timedsend(mqd_t mqdes,
+                 const char *msg_ptr,
+                 size_t msg_len,
+                 unsigned int msg_prio,
+                 const struct timespec *abs_timeout);
+
+/**
+ * @brief  Receive message with absolute timeout
+ * @param  mqdes: The message queue descriptor to provide.
+ * @param  msg_ptr: The buffer for storing the received message.
+ * @param  msg_len: The length of the buffer pointed to by msg_ptr.
+ * @param  msg_prio: The priority of the received message.
+ * @param  abs_timeout: Absolute timeout.
+ * @retval ssize_t: The size of the received message in bytes.
+ */
+ssize_t mq_timedreceive(mqd_t mqdes,
+                        char *msg_ptr,
+                        size_t msg_len,
+                        unsigned int *msg_prio,
+                        const struct timespec *abs_timeout);
 
 #endif

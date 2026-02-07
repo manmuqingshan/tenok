@@ -119,6 +119,11 @@ NACKED int sem_wait(sem_t *sem)
     SYSCALL(SEM_WAIT);
 }
 
+NACKED int sem_timedwait(sem_t *sem, const struct timespec *abstime)
+{
+    SYSCALL(SEM_TIMEDWAIT);
+}
+
 NACKED int sem_getvalue(sem_t *sem, int *sval)
 {
     SYSCALL(SEM_GETVALUE);

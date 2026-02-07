@@ -5,6 +5,7 @@
 #define __SEMAPHORE_H__
 
 #include <stdint.h>
+#include <time.h>
 
 #define __SIZEOF_SEM_T 12 /* sizeof(struct semaphore) */
 
@@ -53,6 +54,14 @@ int sem_trywait(sem_t *sem);
  * @retval int: 0 on success and nonzero error number on error.
  */
 int sem_wait(sem_t *sem);
+
+/**
+ * @brief  Decrement the semaphore or timeout at abstime
+ * @param  sem: Pointer to the semaphore.
+ * @param  abstime: Absolute timeout.
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int sem_timedwait(sem_t *sem, const struct timespec *abstime);
 
 /**
  * @brief  Get the value of the semaphore

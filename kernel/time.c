@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <time.h>
+#include <tenok.h>
 
 #include <arch/port.h>
 #include <kernel/syscall.h>
@@ -140,4 +141,92 @@ void msleep(unsigned int msecs)
 ktime_t ktime_get(void)
 {
     return sys_time.tv_sec * 1000 + sys_time.tv_nsec / 1000000;
+}
+
+static bool timespec_valid(const struct timespec *ts)
+{
+    return ts && ts->tv_sec >= 0 && ts->tv_nsec >= 0 &&
+           ts->tv_nsec < 1000000000L;
+}
+
+static int timespec_cmp(const struct timespec *a, const struct timespec *b)
+{
+    if (a->tv_sec == b->tv_sec) {
+        if (a->tv_nsec == b->tv_nsec)
+            return 0;
+        return (a->tv_nsec > b->tv_nsec) ? 1 : -1;
+    }
+    return (a->tv_sec > b->tv_sec) ? 1 : -1;
+}
+
+static void timespec_sub(struct timespec *out,
+                          const struct timespec *a,
+                          const struct timespec *b)
+{
+    out->tv_sec = a->tv_sec - b->tv_sec;
+    out->tv_nsec = a->tv_nsec - b->tv_nsec;
+    if (out->tv_nsec < 0) {
+        out->tv_sec -= 1;
+        out->tv_nsec += 1000000000L;
+    }
+    if (out->tv_sec < 0) {
+        out->tv_sec = 0;
+        out->tv_nsec = 0;
+    }
+}
+
+static uint64_t timespec_to_ticks(const struct timespec *ts)
+{
+    uint64_t ns = (uint64_t) ts->tv_sec * 1000000000ULL +
+                  (uint64_t) ts->tv_nsec;
+    uint64_t tick_ns = 1000000000ULL / OS_TICK_FREQ;
+    if (tick_ns == 0)
+        return 0;
+    return (ns + tick_ns - 1) / tick_ns;
+}
+
+int clock_nanosleep(clockid_t clockid,
+                    int flags,
+                    const struct timespec *req,
+                    struct timespec *rem)
+{
+    if (!timespec_valid(req))
+        return -EINVAL;
+
+    if (clockid != CLOCK_MONOTONIC)
+        return -EINVAL;
+
+    if (flags != 0 && flags != TIMER_ABSTIME)
+        return -EINVAL;
+
+    struct timespec duration = *req;
+
+    if (flags == TIMER_ABSTIME) {
+        struct timespec now;
+        get_sys_time(&now);
+        if (timespec_cmp(req, &now) <= 0) {
+            if (rem) {
+                rem->tv_sec = 0;
+                rem->tv_nsec = 0;
+            }
+            return 0;
+        }
+        timespec_sub(&duration, req, &now);
+    }
+
+    uint64_t ticks = timespec_to_ticks(&duration);
+    if (ticks > 0)
+        delay_ticks((uint32_t) ticks);
+
+    if (rem) {
+        rem->tv_sec = 0;
+        rem->tv_nsec = 0;
+    }
+
+    return 0;
+}
+
+int nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    return clock_nanosleep(CLOCK_MONOTONIC, 0, req, rem);
 }

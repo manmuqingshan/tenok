@@ -300,6 +300,11 @@ NACKED int pthread_mutex_trylock(pthread_mutex_t *mutex)
     SYSCALL(PTHREAD_MUTEX_TRYLOCK);
 }
 
+NACKED int pthread_mutex_timedlock(pthread_mutex_t *mutex,
+                                   const struct timespec *abstime)
+{
+    SYSCALL(PTHREAD_MUTEX_TIMEDLOCK);
+}
 int pthread_condattr_init(pthread_condattr_t *attr)
 {
     if (!attr)
@@ -350,6 +355,13 @@ NACKED int pthread_cond_broadcast(pthread_cond_t *cond)
 NACKED int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
     SYSCALL(PTHREAD_COND_WAIT);
+}
+
+NACKED int pthread_cond_timedwait(pthread_cond_t *cond,
+                                  pthread_mutex_t *mutex,
+                                  const struct timespec *abstime)
+{
+    SYSCALL(PTHREAD_COND_TIMEDWAIT);
 }
 
 NACKED int pthread_once(pthread_once_t *once_control,

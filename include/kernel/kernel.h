@@ -107,6 +107,7 @@ struct thread_info {
     sigset_t sig_wait_set;     /* The set of the signals to wait */
     uint32_t signal_cnt;       /* The number of pending signals in the queue */
     int *ret_sig;              /* For storing retval of the sigwait */
+    siginfo_t *ret_siginfo;    /* For storing siginfo of wait */
     bool wait_for_signal;      /* Indicates the thread is waiting for signal */
 
     /* Lists */

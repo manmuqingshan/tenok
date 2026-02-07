@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/sched.h>
+#include <time.h>
 
 #include <common/list.h>
 
@@ -326,6 +327,15 @@ int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
 
 /**
+ * @brief  Lock the mutex with absolute timeout
+ * @param  mutex: The mutex to lock.
+ * @param  abstime: Absolute timeout.
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int pthread_mutex_timedlock(pthread_mutex_t *mutex,
+                            const struct timespec *abstime);
+
+/**
  * @brief  Initialize the attribute object of conditional variable with
  *         default values
  * @param  attr: The attribute object of the conditional variable to
@@ -378,6 +388,17 @@ int pthread_cond_broadcast(pthread_cond_t *cond);
  * @retval int: 0 on success and nonzero error number on error.
  */
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+
+/**
+ * @brief  Wait on condition variable with absolute timeout
+ * @param  cond: The condition variable to wait on.
+ * @param  mutex: The mutex to unlock while waiting.
+ * @param  abstime: Absolute timeout.
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int pthread_cond_timedwait(pthread_cond_t *cond,
+                           pthread_mutex_t *mutex,
+                           const struct timespec *abstime);
 
 /**
  * @brief  To ensure a piece of initialization code is executed at most once

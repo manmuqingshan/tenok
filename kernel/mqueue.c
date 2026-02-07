@@ -232,3 +232,21 @@ NACKED int mq_send(mqd_t mqdes,
 {
     SYSCALL(MQ_SEND);
 }
+
+NACKED int mq_timedsend(mqd_t mqdes,
+                        const char *msg_ptr,
+                        size_t msg_len,
+                        unsigned int msg_prio,
+                        const struct timespec *abs_timeout)
+{
+    SYSCALL(MQ_TIMEDSEND);
+}
+
+NACKED ssize_t mq_timedreceive(mqd_t mqdes,
+                               char *msg_ptr,
+                               size_t msg_len,
+                               unsigned int *msg_prio,
+                               const struct timespec *abs_timeout)
+{
+    SYSCALL(MQ_TIMEDRECEIVE);
+}

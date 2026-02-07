@@ -33,6 +33,7 @@
 #define ENOSYS 88       /**< Function not implemented */
 #define ENAMETOOLONG 91 /**< File or path name too long */
 #define EMSGSIZE 122    /**< Message to long */
+#define ETIMEDOUT 110   /**< Connection timed out */
 #define EOVERFLOW 139   /**< Numerical overflow */
 
 #endif

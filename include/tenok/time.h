@@ -10,6 +10,7 @@
 
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
+#define TIMER_ABSTIME 1
 
 struct timespec {
     time_t tv_sec; /* Seconds */
@@ -90,5 +91,26 @@ int timer_gettime(timer_t timerid, struct itimerspec *curr_value);
  * @retval time_t: The time in seconds.
  */
 time_t time(time_t *tloc);
+
+/**
+ * @brief  Suspend execution for a specified time
+ * @param  req: Requested sleep time.
+ * @param  rem: Remaining time if interrupted (optional).
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int nanosleep(const struct timespec *req, struct timespec *rem);
+
+/**
+ * @brief  High-resolution sleep with clock selection
+ * @param  clockid: The clock ID to use.
+ * @param  flags: TIMER_ABSTIME for absolute time, otherwise relative.
+ * @param  req: Requested sleep time.
+ * @param  rem: Remaining time if interrupted (optional).
+ * @retval int: 0 on success and nonzero error number on error.
+ */
+int clock_nanosleep(clockid_t clockid,
+                    int flags,
+                    const struct timespec *req,
+                    struct timespec *rem);
 
 #endif
