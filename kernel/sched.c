@@ -21,8 +21,12 @@ inline int sched_get_priority_min(int policy)
 
 int sched_rr_get_interval(pid_t pid, struct timespec *tp)
 {
-    tp->tv_sec = OS_TICK_FREQ / 1000;
-    tp->tv_nsec = (1000000000 / OS_TICK_FREQ) % 1000000000;
+    if (!tp)
+        return -EINVAL;
+
+    uint64_t ns = 1000000000ULL / OS_TICK_FREQ;
+    tp->tv_sec = ns / 1000000000ULL;
+    tp->tv_nsec = ns % 1000000000ULL;
 
     return 0;
 }
@@ -39,21 +43,38 @@ NACKED int delay_ticks(uint32_t ticks)
 
 unsigned int sleep(unsigned int seconds)
 {
-    delay_ticks(seconds * OS_TICK_FREQ);
+    if (seconds == 0)
+        return 0;
+
+    uint64_t remaining = seconds;
+    const uint64_t max_seconds = UINT32_MAX / OS_TICK_FREQ;
+
+    while (remaining > 0) {
+        uint64_t chunk = remaining;
+        if (chunk > max_seconds)
+            chunk = max_seconds;
+
+        delay_ticks((uint32_t)(chunk * OS_TICK_FREQ));
+        remaining -= chunk;
+    }
+
     return 0;
 }
 
 int usleep(useconds_t usec)
 {
-    /* FIXME: Granularity is too large in current design */
-
-    int usec_tick = OS_TICK_FREQ * usec / 1000000;
-    long granularity_us = 1000000 / OS_TICK_FREQ;
-
-    if ((usec >= 1000000) || (usec < granularity_us)) {
-        return -EINVAL;
-    } else {
-        delay_ticks(usec_tick);
+    if (usec == 0)
         return 0;
-    }
+
+    if (usec >= 1000000)
+        return -EINVAL;
+
+    uint64_t ticks =
+        (OS_TICK_FREQ * (uint64_t) usec + 1000000ULL - 1) / 1000000ULL;
+
+    if (ticks == 0)
+        ticks = 1;
+
+    delay_ticks((uint32_t) ticks);
+    return 0;
 }

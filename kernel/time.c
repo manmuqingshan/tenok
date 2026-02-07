@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <time.h>
 
 #include <arch/port.h>
@@ -9,6 +10,19 @@
 #define NANOSECOND_TICKS (1000000000 / OS_TICK_FREQ)
 
 static struct timespec sys_time;
+
+static void normalize_timespec(struct timespec *time)
+{
+    if (time->tv_nsec >= 1000000000L || time->tv_nsec <= -1000000000L) {
+        time->tv_sec += time->tv_nsec / 1000000000L;
+        time->tv_nsec %= 1000000000L;
+    }
+
+    if (time->tv_nsec < 0) {
+        time->tv_sec -= 1;
+        time->tv_nsec += 1000000000L;
+    }
+}
 
 void timer_up_count(struct timespec *time)
 {
@@ -38,10 +52,7 @@ void time_add(struct timespec *time, time_t sec, long nsec)
     time->tv_sec += sec;
     time->tv_nsec += nsec;
 
-    if (time->tv_nsec >= 1000000000) {
-        time->tv_sec++;
-        time->tv_nsec -= 1000000000;
-    }
+    normalize_timespec(time);
 }
 
 void system_timer_update(void)
@@ -62,6 +73,12 @@ void set_sys_time(const struct timespec *tp)
 int clock_getres(clockid_t clockid, struct timespec *res)
 {
     // TODO: Check clock ID
+
+    if (!res)
+        return -EINVAL;
+
+    if (clockid != CLOCK_MONOTONIC && clockid != CLOCK_REALTIME)
+        return -EINVAL;
 
     res->tv_sec = 0;
     res->tv_nsec = NANOSECOND_TICKS;
