@@ -54,7 +54,7 @@ unsigned int sleep(unsigned int seconds)
         if (chunk > max_seconds)
             chunk = max_seconds;
 
-        delay_ticks((uint32_t)(chunk * OS_TICK_FREQ));
+        delay_ticks((uint32_t) (chunk * OS_TICK_FREQ));
         remaining -= chunk;
     }
 

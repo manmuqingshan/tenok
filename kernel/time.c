@@ -1,6 +1,6 @@
 #include <errno.h>
-#include <time.h>
 #include <tenok.h>
+#include <time.h>
 
 #include <arch/port.h>
 #include <kernel/syscall.h>
@@ -160,8 +160,8 @@ static int timespec_cmp(const struct timespec *a, const struct timespec *b)
 }
 
 static void timespec_sub(struct timespec *out,
-                          const struct timespec *a,
-                          const struct timespec *b)
+                         const struct timespec *a,
+                         const struct timespec *b)
 {
     out->tv_sec = a->tv_sec - b->tv_sec;
     out->tv_nsec = a->tv_nsec - b->tv_nsec;
@@ -177,8 +177,8 @@ static void timespec_sub(struct timespec *out,
 
 static uint64_t timespec_to_ticks(const struct timespec *ts)
 {
-    uint64_t ns = (uint64_t) ts->tv_sec * 1000000000ULL +
-                  (uint64_t) ts->tv_nsec;
+    uint64_t ns =
+        (uint64_t) ts->tv_sec * 1000000000ULL + (uint64_t) ts->tv_nsec;
     uint64_t tick_ns = 1000000000ULL / OS_TICK_FREQ;
     if (tick_ns == 0)
         return 0;

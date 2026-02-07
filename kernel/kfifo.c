@@ -176,8 +176,8 @@ void kfifo_dma_in_finish(struct kfifo *fifo, size_t n)
     int write_idx = kfifo_is_full(fifo) ? fifo->start : fifo->end;
 
     /* Update the record size at the write slot */
-    uint16_t *recsize = (uint16_t *) ((uintptr_t) fifo->data +
-                                      write_idx * fifo->payload_size);
+    uint16_t *recsize =
+        (uint16_t *) ((uintptr_t) fifo->data + write_idx * fifo->payload_size);
     *recsize = n;
 
     if (kfifo_is_full(fifo)) {

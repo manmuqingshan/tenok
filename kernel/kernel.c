@@ -644,7 +644,7 @@ void wake_up(struct list_head *wait_list)
 
     /* Wake up the first highest-priority thread in the waiting list */
     list_move_tail(&highest_pri_thread->list,
-              &ready_list[highest_pri_thread->priority]);
+                   &ready_list[highest_pri_thread->priority]);
     highest_pri_thread->status = THREAD_READY;
 
 leave:
@@ -2265,8 +2265,8 @@ static int sys_mq_timedsend(mqd_t mqdes,
     }
 
     while (1) {
-        retval = __mq_send(mq, &mqd_table[mqdes].attr, msg_ptr, msg_len,
-                           msg_prio);
+        retval =
+            __mq_send(mq, &mqd_table[mqdes].attr, msg_ptr, msg_len, msg_prio);
 
         if (retval != -ERESTARTSYS)
             break;
