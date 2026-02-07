@@ -43,9 +43,6 @@ int mutex_trylock(struct mutex *mtx)
 
     /* Check if the mutex is occupied */
     if (mtx->owner != NULL) {
-        /* Enqueue current thread into the waiting list */
-        prepare_to_wait(&mtx->wait_list, curr_thread, THREAD_WAIT);
-
         retval = -EBUSY;
     } else {
         /* Occupy the mutex by setting the owner */
@@ -62,12 +59,14 @@ int mutex_trylock(struct mutex *mtx)
 int mutex_lock(struct mutex *mtx)
 {
     int retval;
+    CURRENT_THREAD_INFO(curr_thread);
 
     while (1) {
         retval = mutex_trylock(mtx);
 
         if (retval == -EBUSY) {
             thread_inherit_priority(mtx);
+            prepare_to_wait(&mtx->wait_list, curr_thread, THREAD_WAIT);
         } else {
             break;
         }
@@ -98,6 +97,9 @@ int mutex_unlock(struct mutex *mtx)
 
     /* Release the mutex */
     mtx->owner = NULL;
+
+    /* Reset priority inheritance */
+    thread_reset_inherited_priority(mtx);
 
     /* Wake up the highest-priority thread from the waiting list */
     wake_up(&mtx->wait_list);
