@@ -202,7 +202,7 @@ void *kmalloc(size_t size)
         /* Allocate new memory */
         ptr = kmem_cache_alloc(kmalloc_caches[i], 0);
     } else {
-        int page_order = size_to_page_order(size);
+        int page_order = size_to_page_order(alloc_size);
         if (page_order != -1) {
             /* Allocate the memory directly from the page */
             ptr = alloc_pages(page_order);
@@ -215,7 +215,7 @@ void *kmalloc(size_t size)
 
     if (ptr) {
         /* Record the allocated size and return the start address */
-        ((struct kmalloc_header *) ptr)->size = size;
+        ((struct kmalloc_header *) ptr)->alloc_size = alloc_size;
         retval = (void *) ((uintptr_t) ptr + header_size);
     }
 
@@ -236,7 +236,7 @@ void kfree(void *ptr)
         (struct kmalloc_header *) ((uintptr_t) ptr - header_size);
 
     /* Get allocated size */
-    size_t alloc_size = addr->size;
+    size_t alloc_size = addr->alloc_size;
 
     /* Find the kmalloc slab that the memory belongs to */
     int i;

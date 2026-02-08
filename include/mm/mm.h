@@ -16,7 +16,7 @@
     (sizeof(kmalloc_slab_info) / sizeof(struct kmalloc_slab_info))
 
 struct kmalloc_header {
-    size_t size;
+    size_t alloc_size;
 };
 
 struct kmalloc_slab_info {

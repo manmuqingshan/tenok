@@ -32,10 +32,12 @@ static inline struct slab *get_slab_from_obj(void *obj, size_t page_size)
     return (struct slab *) ALIGN((unsigned long) obj, page_size);
 }
 
-static inline int obj_index_in_slab(void *obj, struct kmem_cache *cache)
+static inline int obj_index_in_slab(void *obj,
+                                    struct kmem_cache *cache,
+                                    size_t page_size)
 {
     /* Mask out the base address and divide it by the object size */
-    return (((unsigned long) obj & ((1 << 8) - 1)) - sizeof(struct slab)) /
+    return (((unsigned long) obj & (page_size - 1)) - sizeof(struct slab)) /
            cache->objsize;
 }
 
@@ -158,7 +160,7 @@ static int slab_destroy(struct kmem_cache *cache, struct slab *slab)
 {
     /* Remove the slab from its current list and free the page */
     list_del(&slab->list);
-    free_pages((unsigned long) slab, 0);
+    free_pages((unsigned long) slab, cache->page_order);
 
     return 0;
 }
@@ -167,10 +169,11 @@ void kmem_cache_free(struct kmem_cache *cache, void *obj)
 {
     struct slab *slab;
     int bit;
+    size_t page_size = page_order_to_size(cache->page_order);
 
     /* Acquire the slab from object and its bitmap index */
-    slab = get_slab_from_obj(obj, 256);
-    bit = obj_index_in_slab(obj, cache);
+    slab = get_slab_from_obj(obj, page_size);
+    bit = obj_index_in_slab(obj, cache, page_size);
 
     /* Reset the bitmap of the object in the slab */
     bitmap_clear_bit(slab->free_bitmap, bit);
