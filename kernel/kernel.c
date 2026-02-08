@@ -27,6 +27,7 @@
 #include <fs/fs.h>
 #include <fs/null_dev.h>
 #include <fs/rom_dev.h>
+#include <fs/vfs.h>
 #include <kernel/daemon.h>
 #include <kernel/errno.h>
 #include <kernel/kernel.h>
@@ -937,23 +938,7 @@ static int sys_mount(const char *source, const char *target)
         return -ENAMETOOLONG;
 
     int tid = running_thread->tid;
-
-    /* Send mount request to the file system daemon */
-    request_mount(tid, source, target);
-
-    /* Read mount result from the file system daemon */
-    int fifo_retval, mnt_result;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)],
-                                (char *) &mnt_result, sizeof(mnt_result), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
-
-    return mnt_result;
+    return vfs_mount(tid, source, target);
 }
 
 static int sys_open(const char *pathname, int flags)
@@ -979,26 +964,12 @@ static int sys_open(const char *pathname, int flags)
     /* Acquire the thread ID */
     int tid = running_thread->tid;
 
-    /* Send file open request to the file system daemon */
-    request_open_file(tid, pathname);
-
-    /* Read the file index from the file system daemon */
-    int file_idx;
-    int fifo_retval;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &file_idx,
-                                sizeof(file_idx), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
+    int file_idx = vfs_open_file(tid, pathname);
 
     /* File not found */
-    if (file_idx == -1) {
+    if (file_idx < 0) {
         /* Return error */
-        retval = -ENOENT;
+        retval = file_idx;
         goto err;
     }
 
@@ -1485,28 +1456,7 @@ static int sys_opendir(const char *pathname, DIR *dirp /* FIXME */)
 
     int tid = running_thread->tid;
 
-    /* Send directory open request to the file system daemon */
-    request_open_directory(tid, pathname);
-
-    /* Read the directory inode from the file system daemon */
-    struct inode *inode_dir;
-    int fifo_retval;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &inode_dir,
-                                sizeof(inode_dir), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
-
-    /* Return directory information */
-    dirp->inode_dir = inode_dir;
-    dirp->dentry_list = inode_dir->i_dentry.next;
-
-    /* Check if the information is retrieved successfully */
-    return dirp->inode_dir ? 0 : -ENOENT;
+    return vfs_open_dir(tid, pathname, dirp);
 }
 
 static int sys_readdir(DIR *dirp, struct dirent *dirent)
@@ -1515,7 +1465,7 @@ static int sys_readdir(DIR *dirp, struct dirent *dirent)
         return -EFAULT;
 
     preempt_disable();
-    int retval = fs_read_dir(dirp, dirent);
+    int retval = vfs_readdir(dirp, dirent);
     preempt_enable();
 
     return retval;
@@ -1524,48 +1474,13 @@ static int sys_readdir(DIR *dirp, struct dirent *dirent)
 static char *sys_getcwd(char *buf, size_t size)
 {
     int tid = running_thread->tid;
-
-    /* Send getcwd request to the file system daemon */
-    request_getcwd(tid, buf, size);
-
-    /* Read getcwd result from the file system daemon */
-    char *path;
-    int fifo_retval;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &path,
-                                sizeof(path), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
-
-    return path;
+    return vfs_getcwd(tid, buf, size);
 }
 
 static int sys_chdir(const char *path)
 {
     int tid = running_thread->tid;
-
-    /* Send chdir request to the file system daemon */
-    request_chdir(tid, path);
-
-    /* Read chdir result from the file system daemon */
-    int chdir_result;
-    int fifo_retval;
-    while (1) {
-        fifo_retval =
-            fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &chdir_result,
-                      sizeof(chdir_result), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
-
-    return chdir_result;
+    return vfs_chdir(tid, path);
 }
 
 static int sys_getpid(void)
@@ -1581,21 +1496,7 @@ static int sys_mknod(const char *pathname, mode_t mode, dev_t dev)
 
     int tid = running_thread->tid;
 
-    /* Send file create request to the file system daemon */
-    request_create_file(tid, pathname, dev);
-
-    /* Read file index from the file system daemon  */
-    int file_idx;
-    int fifo_retval;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &file_idx,
-                                sizeof(file_idx), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
+    int file_idx = vfs_create_file(tid, pathname, dev);
 
     if (file_idx == -1) {
         /* Failed to create file */
@@ -1614,21 +1515,7 @@ static int sys_mkfifo(const char *pathname, mode_t mode)
 
     int tid = running_thread->tid;
 
-    /* Send file create request to the file system daemon */
-    request_create_file(tid, pathname, S_IFIFO);
-
-    /* Read the file index from the file system daemon */
-    int file_idx = 0;
-    int fifo_retval;
-    while (1) {
-        fifo_retval = fifo_read(files[THREAD_PIPE_FD(tid)], (char *) &file_idx,
-                                sizeof(file_idx), 0);
-
-        if (fifo_retval != -ERESTARTSYS)
-            break;
-
-        schedule();
-    }
+    int file_idx = vfs_create_file(tid, pathname, S_IFIFO);
 
     if (file_idx == -1) {
         /* Failed to create FIFO */

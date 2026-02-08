@@ -26,4 +26,4 @@ void led_task1(void)
     }
 }
 
-HOOK_USER_TASK(led_task1, 3, 512);
+HOOK_USER_TASK(led_task1, 3, 1024);

@@ -99,6 +99,7 @@ SRC += $(ST_LIB)/src/misc.c \
 
 SRC += ./kernel/arch/v7m_port.c \
        ./kernel/fs/fs.c \
+       ./kernel/fs/vfs.c \
        ./kernel/fs/wrapper.c \
        ./kernel/fs/reg_file.c \
        ./kernel/fs/rom_dev.c \
